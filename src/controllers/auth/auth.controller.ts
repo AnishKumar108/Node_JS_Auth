@@ -1,6 +1,6 @@
 import { comparePassword, hashPassword } from "../../lib/hash.js";
 import { sendEmail } from "../../lib/mail.js";
-import { generateAccessToken, generateRefreshToken } from "../../lib/token.js";
+import { generateAccessToken, generateRefreshToken ,verifyRefreshToken} from "../../lib/token.js";
 import { User } from "../../models/user.model.js";
 import { loginSchema, registerSchema } from "./auth.schema.js";
 import { Request, Response } from "express";
@@ -159,4 +159,65 @@ export async function loginHandler(req:Request,res:Response){
         console.log(err);
         return res.status(500).json({message:"Internal Server error"})
     }
+}
+
+export async function refreshHandler(req:Request,res:Response){
+
+    try{
+        const token = req.cookies?.refreshToken;
+        if(!token){
+            return res.status(401).json({message:"Refresh token not found"})
+        };
+
+        const payload =  await verifyRefreshToken(token);
+
+        const user = await User.findById(payload.sub);
+
+        if(!user){
+            return res.status(401).json({message:"User Doesn't exist"})
+        };
+
+        if(user.tokenVersion !== payload.tokenVersion){
+            return res.status(401).json({message:"Invalid refresh token"})
+        };
+
+        const newAccessToken = await generateAccessToken(user.id,user.role,user.tokenVersion);
+
+        const newRefreshToken = await generateRefreshToken(user.id,user.tokenVersion);
+
+        const isProd = process.env.NODE_ENV === "production"
+
+        res.cookie("refreshToken",newRefreshToken,{
+            httpOnly:true,
+            secure:isProd,
+            sameSite:"lax",
+            maxAge:7*24*60*60*1000
+
+        });
+
+        return res.status(200).json({message:"Refresh token renewed",
+            accessToken:newAccessToken,
+            user:{
+                id:user.id,
+                name:user.name,
+                role:user.role,
+                isEmailVerified:user.isEmailVerified,
+                twoFactorEnabled:user.twoFactorEnabled
+            }
+        })
+
+
+    }
+    catch(err){
+        console.log(err);
+        return res.status(500).json({message:"Internal Server error"})
+    }
+}
+
+
+export async function logoutHandler(_req:Request,res:Response){
+    res.clearCookie("refreshToken",{path:"/"});
+
+
+    return res.status(200).json({message:"Logged out successfully"})
 }
