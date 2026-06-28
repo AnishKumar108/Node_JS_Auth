@@ -4,7 +4,9 @@ import { generateAccessToken, generateRefreshToken ,verifyRefreshToken} from "..
 import { User } from "../../models/user.model.js";
 import { loginSchema, registerSchema } from "./auth.schema.js";
 import { Request, Response } from "express";
-import jwt from "jsonwebtoken"
+import jwt from "jsonwebtoken";
+import crypto from "crypto"
+
 
 function getAppUrl(){
     return process.env.APP_URL || `http://localhost:${process.env.PORT}`
@@ -221,3 +223,79 @@ export async function logoutHandler(_req:Request,res:Response){
 
     return res.status(200).json({message:"Logged out successfully"})
 }
+
+export async function forgotPasswordHandler(req:Request,res:Response){
+    const {email} = req.body as {email?:string};
+    if(!email){
+        return res.status(400).json({message:"Please Provide email !!"})
+    }
+    const normalizedEmail = email.toLowerCase().trim();
+
+    try{
+        const user = await User.findOne({email:normalizedEmail});
+        if(!user){
+            return res.json({message:"If email exist , we will send you a reset password link"})
+        };
+        const token = crypto.randomBytes(32).toString("hex");
+        const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+
+        user.resetPasswordToken = hashedToken;
+        user.resetPasswordExpires = new Date(Date.now() + 15*60*1000);
+
+        await user.save()
+
+        const resetUrl = `${getAppUrl()}/auth/reset-password?token=${token}`;
+        await sendEmail(user.email,
+            "Reset Your password ",
+            `<p>Click on below link to reset your password</p>
+            <p><a href="${resetUrl}">${resetUrl}</a></p>`);
+
+        return res.json({message:"If email exist , we will send you a reset password link"})
+
+    }
+    catch(err){
+        console.log(err);
+        return res.status(500).json({message:"Internal Server error"})
+    }
+}
+
+export async function resetPasswordHandler(req:Request,res:Response){
+    const {token,password} = req.body as {token:string,password:string};
+
+    if(!token || !password || password.length<6){
+        return res.status(400).json({message:"Invalid token or password"})
+    };
+
+    try{
+        const hashToken =  crypto.createHash("sha256").update(token).digest("hex");
+
+        const user = await User.findOne({resetPasswordToken:hashToken,resetPasswordExpires:{$gt:new Date()}});
+
+        if(!user){
+            return res.status(400).json({message:"Invalid or expired reset password token"})
+        };
+
+        const newPassword = await hashPassword(password);
+
+        user.passwordHash = newPassword
+
+
+
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpires = undefined;
+
+        user.tokenVersion = user.tokenVersion + 1;
+
+        await user.save();
+
+        return res.status(200).json({message:"Password reset successfully"})
+
+
+
+    }
+    catch(err){
+        console.log(err);
+        return res.status(500).json({message:"Internal server error"})
+    }
+}
+
