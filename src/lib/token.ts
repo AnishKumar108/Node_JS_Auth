@@ -4,6 +4,10 @@ export async function generateAccessToken (userId:string,role:"user"|"admin",tok
     const payload = {sub:userId,role,tokenVersion};
 
     return await jwt.sign(payload,process.env.JWT_ACCESS_SECRET!,{expiresIn:"30m"})
+};
+
+export async function verifyAccessToken(token:string){
+    return jwt.verify(token,process.env.JWT_ACCESS_SECRET!) as {sub:string,role:"user" | "admin", tokenVersion:number}
 }
 
 export async function generateRefreshToken (userId:string,tokenVersion:number){
